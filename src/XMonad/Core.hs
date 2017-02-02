@@ -50,6 +50,7 @@ import System.Posix.IO
 import System.Posix.Types (ProcessID)
 import System.Process
 import System.Directory
+import System.Environment (lookupEnv)
 import System.Exit
 import Graphics.X11.Xlib
 import Graphics.X11.Xlib.Extras (getWindowAttributes, WindowAttributes, Event)
@@ -570,7 +571,7 @@ recompile force = io $ do
         src  = cfgdir </> "xmonad.hs"
         lib  = cfgdir </> "lib"
         buildscript = cfgdir </> "build"
-
+    ghc <- fromMaybe "ghc" <$> liftIO (lookupEnv "NIX_GHC")
     libTs <- mapM getModTime . Prelude.filter isSource =<< allFiles lib
     srcT <- getModTime src
     binT <- getModTime bin
@@ -586,7 +587,7 @@ recompile force = io $ do
         status <- bracket (openFile err WriteMode) hClose $ \errHandle ->
             waitForProcess =<< if useBuildscript
                                then compileScript bin cfgdir buildscript errHandle
-                               else compileGHC bin cfgdir errHandle
+                               else compileGHC ghc bin cfgdir errHandle
 
         -- re-enable SIGCHLD:
         installSignalHandlers
@@ -594,6 +595,7 @@ recompile force = io $ do
         -- now, if it fails, run xmessage to let the user know:
         when (status /= ExitSuccess) $ do
             ghcErr <- readFile err
+            xmessage <- fromMaybe "xmessage" <$> liftIO (lookupEnv "XMONAD_XMESSAGE")
             let msg = unlines $
                     ["Error detected while loading xmonad configuration file: " ++ src]
                     ++ lines (if null ghcErr then show status else ghcErr)
@@ -601,7 +603,7 @@ recompile force = io $ do
             -- nb, the ordering of printing, then forking, is crucial due to
             -- lazy evaluation
             hPutStrLn stderr msg
-            forkProcess $ executeFile "xmessage" True ["-default", "okay", replaceUnicode msg] Nothing
+            forkProcess $ executeFile  xmessage  True ["-default", "okay", replaceUnicode msg] Nothing
             return ()
         return (status == ExitSuccess)
       else return True
@@ -619,8 +621,8 @@ recompile force = io $ do
            '\8216' -> '`'  -- ‘
            '\8217' -> '`'  -- ’
            _ -> c
-       compileGHC bin dir errHandle =
-         runProcess "ghc" ["--make"
+       compileGHC ghc bin dir errHandle =
+         runProcess  ghc  ["--make"
                           , "xmonad.hs"
                           , "-i"
                           , "-ilib"
